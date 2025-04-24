@@ -1,232 +1,133 @@
-/* USER CODE BEGIN Header */
-/**
-  ******************************************************************************
-  * @file           : main.c
-  * @brief          : Main program body
-  ******************************************************************************
-  * @attention
-  *
-  * <h2><center>&copy; Copyright (c) 2019 STMicroelectronics.
-  * All rights reserved.</center></h2>
-  *
-  * This software component is licensed by ST under BSD 3-Clause license,
-  * the "License"; You may not use this file except in compliance with the
-  * License. You may obtain a copy of the License at:
-  *                        opensource.org/licenses/BSD-3-Clause
-  *
-  ******************************************************************************
-  */
-/* USER CODE END Header */
-/* Includes ------------------------------------------------------------------*/
+
 #include "main.h"
 #include "stm32f4xx.h"
 
-/* Private includes ----------------------------------------------------------*/
-/* USER CODE BEGIN Includes */
 #include <string.h>
 #include <stdio.h>
-/* USER CODE END Includes */
+#include <stdbool.h>
 
-/* Private typedef -----------------------------------------------------------*/
-/* USER CODE BEGIN PTD */
 #define usTIM	TIM4
+#define MIN_DISTANCE 10.0f  // Minimum distance in cm to trigger the alarm
+#define ALARM_TIME_MS 5000
 
-
-/* USER CODE END PTD */
-
-/* Private define ------------------------------------------------------------*/
-/* USER CODE BEGIN PD */
-
-/* USER CODE END PD */
-
-/* Private macro -------------------------------------------------------------*/
-/* USER CODE BEGIN PM */
-
-/* USER CODE END PM */
-
-/* Private variables ---------------------------------------------------------*/
 TIM_HandleTypeDef htim3;
 TIM_HandleTypeDef htim4;
-
 UART_HandleTypeDef huart2;
 
-/* USER CODE BEGIN PV */
+volatile uint8_t alarmActive = 0;
+volatile uint32_t lastAlarmTime = 0;
+const float speedOfSound = 0.0343;
+float distance = 0;
+uint32_t numTicks = 0;
 
-/* USER CODE END PV */
+char uartBuf[100];
 
-/* Private function prototypes -----------------------------------------------*/
+float currentDistance = 0;
+
+
+
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
-//static void MX_TIM4_Init(void);
 static void MX_USART2_UART_Init(void);
 void TIMER3_Setup(void);
 void TIMER4_Setup(void);
-/* USER CODE BEGIN PFP */
-void TurnLedOn(void);
+void TIMER2_Setup(void);
+void ControlAlarm(bool enable);
+float MeasureDistance(void);
+static void microDelay(uint32_t delay);
 void TurnBuzzerOn(void);
-static void microDelay (uint32_t delay);
-void TurnLedOff(void);
 void TurnBuzzerOff(void);
-/* USER CODE END PFP */
+void TurnLedOn(void);
+void TurnLedOff(void);
 
-/* Private user code ---------------------------------------------------------*/
-/* USER CODE BEGIN 0 */
-//Speed of sound in cm/usec
-const float speedOfSound = 0.0343;
-float distance;
-
-char uartBuf[100];
-uint8_t minimum_distance = 15;	//minimum distance in cm to wake up the alarm
-uint32_t numTicks = 0;
-
-uint32_t lastAlarmTime = 0;
-uint8_t alarmActive = 0;    // Flag for active alarm
-/* USER CODE END 0 */
-
-/**
-  * @brief  The application entry point.
-  * @retval int
-  */
 int main(void)
 {
+	  HAL_Init();
+	  SystemClock_Config();
+	  MX_GPIO_Init();
+	  MX_USART2_UART_Init();
 
-  /* USER CODE BEGIN 1 */
+	  TIMER3_Setup();
+	  TIMER4_Setup();
 
-  /* USER CODE END 1 */
+	  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
+	  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
+	  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3);
+	  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_4);
 
-  /* MCU Configuration--------------------------------------------------------*/
-
-  /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
-  HAL_Init();
-
-  /* USER CODE BEGIN Init */
-
-  /* USER CODE END Init */
-
-  /* Configure the system clock */
-  SystemClock_Config();
-
-  /* USER CODE BEGIN SysInit */
-
-  /* USER CODE END SysInit */
-
-  /* Initialize all configured peripherals */
-  MX_GPIO_Init();
-  TIMER4_Setup();
-  MX_USART2_UART_Init();
-  TIMER3_Setup();
-
-  /* USER CODE BEGIN 2 */
-  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);  // CH1
-  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);  // CH2
-  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3);  // CH3
-  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_4);  // CH4
-  /* USER CODE END 2 */
-
-  /* Infinite loop */
-  /* USER CODE BEGIN WHILE */
-  while (1)
-  {
-
-	  TurnLedOff();
 	  TurnBuzzerOff();
+	  TurnLedOff();
 
-    /* USER CODE END WHILE */
+	  while (1) {
+		  currentDistance = MeasureDistance();
+		  	//used for debbuging and to check if measurement is correct !
+		    sprintf(uartBuf, "Distance (cm) = %.1f\r\n", currentDistance);
+		    HAL_UART_Transmit(&huart2, (uint8_t *)uartBuf, strlen(uartBuf), 100);
 
-    /* USER CODE BEGIN 3 */
-		//Set TRIG to LOW for few uSec
+	      // Check minimum distance
+	      if(currentDistance < MIN_DISTANCE) {
+	          alarmActive = true;
+	          lastAlarmTime = HAL_GetTick();
+	      }
 
-		HAL_GPIO_WritePin(TRIG_GPIO_Port, TRIG_Pin, GPIO_PIN_RESET);
-		microDelay(3);
-		//*** START Ultrasonic measure routine ***//
-		//1. Output 10 usec TRIG
-		HAL_GPIO_WritePin(TRIG_GPIO_Port, TRIG_Pin, GPIO_PIN_SET);
-		microDelay(10);
-		HAL_GPIO_WritePin(TRIG_GPIO_Port, TRIG_Pin, GPIO_PIN_RESET);
+	      // Control alarm
+	      if (alarmActive) {
+	          ControlAlarm(true);
 
-		//2. Wait for ECHO pin rising edge
-		while(HAL_GPIO_ReadPin(ECHO_GPIO_Port, ECHO_Pin) == GPIO_PIN_RESET);
+	          if (HAL_GetTick() - lastAlarmTime >= ALARM_TIME_MS) {
+	              alarmActive = false;
+	              ControlAlarm(false);
+	          }
+	      }
 
-		//3. Start measuring ECHO pulse width in usec
-		numTicks = 0;
-		while(HAL_GPIO_ReadPin(ECHO_GPIO_Port, ECHO_Pin) == GPIO_PIN_SET)
-		{
-			numTicks++;
-			microDelay(1);//2.8usec
-		};
-
-		//4. Estimate distance in cm
-		distance = (numTicks + 0.0f)*speedOfSound;
-
-		//5. Print to UART terminal for debugging
-		sprintf(uartBuf, "Distance (cm)  = %.1f\r\n", distance);
-		HAL_UART_Transmit(&huart2, (uint8_t *)uartBuf, strlen(uartBuf), 100);
+	      HAL_Delay(100);
+	  }
+	}
 
 
-		static uint8_t alarmActive = 0;  // Globalna varijabla za praćenje stanja
+float MeasureDistance(void) {
+    uint32_t numTicks = 0;
+    float distance = 0.0f;
 
-		// In your main loop
-		while (1) {
+    // 1. Initially reset the TRIG pin
+    HAL_GPIO_WritePin(TRIG_GPIO_Port, TRIG_Pin, GPIO_PIN_RESET);
+    microDelay(3);  // Short delay for stabilization
 
+    // 2. Generate a 10 µs TRIG pulse
+    HAL_GPIO_WritePin(TRIG_GPIO_Port, TRIG_Pin, GPIO_PIN_SET);
+    microDelay(10);
+    HAL_GPIO_WritePin(TRIG_GPIO_Port, TRIG_Pin, GPIO_PIN_RESET);
 
-		    // Alarm control logic
-		    if (distance <= minimum_distance) {
-		        if (!alarmActive) {
-		            // Start the alarm
-		            TurnLedOn();
-		            TurnBuzzerOn();
-		            alarmActive = 1;
-		            lastAlarmTime = HAL_GetTick();
-		        }
-		        else {
-		            // Check if 5 seconds have passed
-		            if (HAL_GetTick() - lastAlarmTime >= 5000) {
-		                TurnLedOff();
-		                TurnBuzzerOff();
-		                alarmActive = 0;
-		            }
-		        }
-		    }
-		    else {
-		        // Object is far enough - turn off immediately
-		        if (alarmActive) {
-		            TurnLedOff();
-		            TurnBuzzerOff();
-		            alarmActive = 0;
-		        }
-		    }
+    // 3. Wait for the rising edge on the ECHO pin
+    while (HAL_GPIO_ReadPin(ECHO_GPIO_Port, ECHO_Pin) == GPIO_PIN_RESET);
 
-		    HAL_Delay(100); // Small delay to prevent CPU overload
-		}
+    // 4. Measure the duration of the ECHO pulse (in µs)
+    while (HAL_GPIO_ReadPin(ECHO_GPIO_Port, ECHO_Pin) == GPIO_PIN_SET) {
+        numTicks++;
+        microDelay(1);  // Each tick ≈ 1 µs
+    }
 
-	   /*
-	    if (distance <= minimum_distance && !isAlarmActive) {
-	        isAlarmActive = 1;
-	        alarmStartTime = HAL_GetTick();
-	        TurnLedOn();
-	        TurnBuzzerOn();
+    // 5. Calculate the distance in cm
+    distance = (float)numTicks * speedOfSound;
 
-	    }
-
-	    // Check if 5 seconds have passed since alarm started
-	    if (isAlarmActive && (HAL_GetTick() - alarmStartTime >= 5000)) {
-	        isAlarmActive = 0;  // Reset alarm state
-
-	        // Don't turn off here - let next loop iteration handle it
-	    }
-*/
-
-	    HAL_Delay(100);
-
-
-  }
-  /* USER CODE END 3 */
+    return distance;
 }
-
 /**
   * @brief System Clock Configuration
   * @retval None
   */
+
+void ControlAlarm(bool enable) {
+    if (enable) {
+    	TurnLedOn();
+		TurnBuzzerOn();
+
+    } else {
+    	TurnLedOff();
+        TurnBuzzerOff();
+
+    }
+}
 void SystemClock_Config(void)
 {
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
@@ -321,13 +222,7 @@ void TIMER4_Setup(void)
 static void MX_USART2_UART_Init(void)
 {
 
-  /* USER CODE BEGIN USART2_Init 0 */
 
-  /* USER CODE END USART2_Init 0 */
-
-  /* USER CODE BEGIN USART2_Init 1 */
-
-  /* USER CODE END USART2_Init 1 */
   huart2.Instance = USART2;
   huart2.Init.BaudRate = 115200;
   huart2.Init.WordLength = UART_WORDLENGTH_8B;
@@ -340,9 +235,7 @@ static void MX_USART2_UART_Init(void)
   {
     Error_Handler();
   }
-  /* USER CODE BEGIN USART2_Init 2 */
 
-  /* USER CODE END USART2_Init 2 */
 
 }
 
@@ -413,7 +306,7 @@ void TIMER3_Setup(void)
 	  __HAL_RCC_TIM3_CLK_ENABLE();
 	  htim3.Instance = TIM3;
 	  htim3.Init.Prescaler = 84 - 1;  // 1 MHz clock (1 µs/tick)
-	  htim3.Init.Period = 0xF;     // Max period
+	  htim3.Init.Period = 0xFFFFFFFF;     // Max period
 	  htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
 	if(HAL_TIM_Base_Init(&htim3) != HAL_OK) {
 		    Error_Handler();
