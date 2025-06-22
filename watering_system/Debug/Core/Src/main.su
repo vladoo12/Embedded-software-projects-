@@ -1,0 +1,12 @@
+../Core/Src/main.c:117:5:main	128	static
+../Core/Src/main.c:265:6:SystemClock_Config	88	static
+../Core/Src/main.c:313:13:MX_ADC1_Init	24	static
+../Core/Src/main.c:374:13:MX_I2C1_Init	8	static
+../Core/Src/main.c:408:13:MX_RTC_Init	32	static
+../Core/Src/main.c:471:13:MX_TIM1_Init	96	static
+../Core/Src/main.c:546:13:MX_USART2_UART_Init	8	static
+../Core/Src/main.c:577:13:MX_DMA_Init	16	static
+../Core/Src/main.c:595:13:MX_GPIO_Init	48	static
+../Core/Src/main.c:626:7:ConvertToMoisturePercent	24	static
+../Core/Src/main.c:638:7:ConvertToLuxPercent	24	static
+../Core/Src/main.c:655:6:Error_Handler	4	static,ignoring_inline_asm

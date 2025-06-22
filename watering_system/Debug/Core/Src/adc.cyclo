@@ -1,0 +1,5 @@
+../Core/Src/adc.c:20:6:MX_ADC1_Init	4
+../Core/Src/adc.c:77:6:My_ADC_Init	1
+../Core/Src/adc.c:86:6:ADC_StartConversion	1
+../Core/Src/adc.c:93:6:ADC_GetValues	2
+../Core/Src/adc.c:105:6:HAL_ADC_ConvCpltCallback	1
